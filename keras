@@ -119,7 +119,10 @@ def data_generator(data):
                     beg = 0
                 wav = wav[beg: beg + newSampleRate]
                 freqs, times, spectrogram = log_specgram(wav, newSampleRate)
-                #print(spectrogram)
+                mean = np.mean(spectrogram, axis=0)
+                std = np.std(spectrogram, axis=0)
+                spectrogram = (spectrogram - mean) / std
+                print(spectrogram)
                 yield (
                     spectrogram,
                     np.int32(label_id)

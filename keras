@@ -1,0 +1,181 @@
+DATADIR = '../input' # unzipped train and test data
+OUTDIR = './model-k' # just a random name
+# Data Loading
+import os
+import re
+import numpy as np
+from glob import glob
+import zipfile
+
+
+
+POSSIBLE_LABELS = 'yes no up down left right on off stop go silence unknown'.split()
+id2name = {i: name for i, name in enumerate(POSSIBLE_LABELS)}
+name2id = {name: i for i, name in id2name.items()}
+
+
+def load_data(data_dir):
+    """ Return 2 lists of tuples:
+    [(class_id, user_id, path), ...] for train
+    [(class_id, user_id, path), ...] for validation
+    """
+    # Just a simple regexp for paths with three groups:
+    # prefix, label, user_id
+    pattern = re.compile("(.+\/)?(\w+)\/([^_]+)_.+wav")
+    all_files = glob(os.path.join(data_dir, 'train/audio/*/*wav'))
+
+    with open(os.path.join(data_dir, 'train/validation_list.txt'), 'r') as fin:
+        validation_files = fin.readlines()
+    valset = set()
+    for entry in validation_files:
+        r = re.match(pattern, entry)
+        if r:
+            valset.add(r.group(3))
+            
+    with open(os.path.join(data_dir, 'train/testing_list.txt'), 'r') as fin:
+        testFiles = fin.readlines()
+    testSet = set()
+    for entry in testFiles:
+        r = re.match(pattern, entry)
+        if r:
+            testSet.add(r.group(3))
+
+    possible = set(POSSIBLE_LABELS)
+    train, val, test = [], [], []
+    for entry in all_files:
+        r = re.match(pattern, entry)
+        if r:
+            label, uid = r.group(2), r.group(3)
+            if label == '_background_noise_':
+                label = 'silence'
+            if label not in possible:
+                label = 'unknown'
+            label_id = name2id[label]
+
+            sample = (label_id, uid, entry)
+
+            if uid in valset:
+                val.append(sample)
+            elif uid in testSet:
+                test.append(sample)
+            else:
+                train.append(sample)
+
+    print('There are {} train, {} val, {} test samples'.format(len(train), len(val), len(test)))
+    return train, val, test
+        
+trainset, valset, testset = load_data(DATADIR)
+
+from scipy.io import wavfile
+import scipy.signal as signal
+
+def log_specgram(audio, sample_rate, window_size=20,
+                 step_size=10, eps=1e-10):
+    nperseg = int(round(window_size * sample_rate / 1e3))
+    noverlap = int(round(step_size * sample_rate / 1e3))
+    freqs, times, spec = signal.spectrogram(audio,
+                                    fs=sample_rate,
+                                    window='hann',
+                                    nperseg=nperseg,
+                                    noverlap=noverlap,
+                                    detrend=False)
+    return freqs, times, np.log(spec.T.astype(np.float32) + eps)
+
+def custom_fft(y, fs):
+    T = 1.0 / fs
+    N = y.shape[0]
+    yf = fft(y)
+    xf = np.linspace(0.0, 1.0/(2.0*T), N//2)
+    vals = 2.0/N * np.abs(yf[0:N//2])  # FFT is simmetrical, so we take just the first half
+    return xf, vals
+
+limit = 500
+sampleRate = 16000
+newSampleRate = 8000
+#Atmeta failus maziau nei 1 sekunde. <- Taisyti
+#Daugiau nei viena sekunde yra tik background (kaip silence), todel dalinam i dalis po 1 sekunde
+#visu grazintu ilgis 16000
+def data_generator(data):
+    count = 0
+    np.random.shuffle(data)
+    for (label_id, uid, fname) in data:
+        count = count + 1
+        if count % 100 == 0:
+            print(count)
+        if count >= limit:
+            raise StopIteration
+        try:
+            a, wav = wavfile.read(fname)
+            wav = wav.astype(np.float32) / np.iinfo(np.int16).max
+            if len(wav) < sampleRate:
+                wav = np.pad(wav, (0, sampleRate - len(wav)), 'constant')
+            # let's generate more silence!
+            wav = signal.resample(wav, int(newSampleRate/sampleRate * wav.shape[0]))
+            samples_per_file = 1 if label_id != name2id['silence'] else 20
+            for _ in range(samples_per_file):
+                if len(wav) > newSampleRate:
+                    beg = np.random.randint(0, len(wav) - newSampleRate)
+                else:
+                    beg = 0
+                wav = wav[beg: beg + newSampleRate]
+                freqs, times, spectrogram = log_specgram(wav, newSampleRate)
+                #print(spectrogram)
+                yield (
+                    spectrogram,
+                    np.int32(label_id)
+                )
+        except Exception as err:
+            print(err, label_id, uid, fname)
+            
+def generatorToDataXYArrays(generator):
+    X, Y = [], []
+    for d in generator:
+        X.append(d[0])
+        Y.append(d[1])
+    return np.array(X), np.array(Y)
+  
+x_train, y_train = generatorToDataXYArrays(data_generator(trainset))
+x_val, y_val = generatorToDataXYArrays(data_generator(valset))
+x_test, y_test = generatorToDataXYArrays(data_generator(testset))
+
+import tensorflow as tf
+
+print(x_train[0])
+x_train = tf.keras.utils.normalize(x_train)
+print(x_train[0])
+x_val = tf.keras.utils.normalize(x_val)
+x_test = tf.keras.utils.normalize(x_test)
+
+model = tf.keras.models.Sequential()
+model.add(tf.keras.layers.Dense(4, input_dim = 8000, activation=tf.nn.relu))
+model.add(tf.keras.layers.Dropout(0.3))
+model.add(tf.keras.layers.Dense(2000, activation=tf.nn.relu))
+model.add(tf.keras.layers.Dropout(0.3))
+model.add(tf.keras.layers.Dense(2000, activation=tf.nn.relu))
+model.add(tf.keras.layers.Dropout(0.3))
+model.add(tf.keras.layers.Dense(len(POSSIBLE_LABELS), activation=tf.nn.softmax))
+
+model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=["accuracy"])
+
+#print(next((data_generator(testset)))
+#for t in data_generator(testset):
+#    print(len(t[1]))
+#    if len(t[0]) != 16000:
+#        print(len(t[0]))
+       
+
+#model = Sequential()
+#model.add(Conv2D(32, kernel_size=(3, 3),
+#                 activation='relu',
+#                 input_shape=input_shape))
+#model.add(Conv2D(64, (3, 3), activation='relu'))
+#model.add(MaxPooling2D(pool_size=(2, 2)))
+#model.add(Dropout(0.25))
+#model.add(Flatten())
+#model.add(Dense(128, activation='relu'))
+#model.add(Dropout(0.5))
+#model.add(Dense(num_classes, activation='softmax'))       
+
+model.fit(x_train, y_train, validation_data=(x_val, y_val), epochs = 30)
+a = model.evaluate(x_test, y_test)
+print(a)

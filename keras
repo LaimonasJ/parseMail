@@ -7,7 +7,7 @@ import numpy as np
 from glob import glob
 import zipfile
 
-
+start = timeit.timeit()
 
 POSSIBLE_LABELS = 'yes no up down left right on off stop go silence unknown'.split()
 id2name = {i: name for i, name in enumerate(POSSIBLE_LABELS)}
@@ -89,7 +89,7 @@ def custom_fft(y, fs):
     vals = 2.0/N * np.abs(yf[0:N//2])  # FFT is simmetrical, so we take just the first half
     return xf, vals
 
-limit = 500
+limit = 5000000
 sampleRate = 16000
 newSampleRate = 8000
 #Atmeta failus maziau nei 1 sekunde. <- Taisyti
@@ -106,11 +106,16 @@ def data_generator(data):
             raise StopIteration
         try:
             a, wav = wavfile.read(fname)
-            wav = wav.astype(np.float32) / np.iinfo(np.int16).max
+            #wav = wav.astype(np.float32) / np.iinfo(np.int16).max
             if len(wav) < sampleRate:
-                wav = np.pad(wav, (0, sampleRate - len(wav)), 'constant')
-            # let's generate more silence!
-            wav = signal.resample(wav, int(newSampleRate/sampleRate * wav.shape[0]))
+                #wav = np.pad(wav, (0, sampleRate - len(wav)), 'constant')
+                continue
+            
+            #wav = signal.resample(wav, int(newSampleRate/sampleRate * wav.shape[0]))
+            newSampleRate = sampleRate
+            
+            
+            #print(fname)
             samples_per_file = 1 if label_id != name2id['silence'] else 20
             for _ in range(samples_per_file):
                 if len(wav) > newSampleRate:
@@ -118,13 +123,16 @@ def data_generator(data):
                 else:
                     beg = 0
                 wav = wav[beg: beg + newSampleRate]
+                wav = wav.astype(np.float32) / np.iinfo(np.int16).max
+                if count == 0:
+                    
                 freqs, times, spectrogram = log_specgram(wav, newSampleRate)
                 mean = np.mean(spectrogram, axis=0)
                 std = np.std(spectrogram, axis=0)
                 spectrogram = (spectrogram - mean) / std
                 #print(spectrogram)
                 yield (
-                    wav,
+                    spectrogram,
                     np.int32(label_id)
                 )
         except Exception as err:
@@ -136,19 +144,21 @@ def generatorToDataXYArrays(generator):
         X.append(d[0])
         Y.append(d[1])
     return np.array(X), np.array(Y)
-  
+ 
+
 x_train, y_train = generatorToDataXYArrays(data_generator(trainset))
-print(x_train.shape)
 x_val, y_val = generatorToDataXYArrays(data_generator(valset))
 x_test, y_test = generatorToDataXYArrays(data_generator(testset))
 
+
 import tensorflow as tf
 
+x_train = x_train.reshape([-1,99, 161,1])
+x_val = x_val.reshape([-1,99, 161,1])
+x_test = x_test.reshape([-1,99, 161,1])
 
-x_train = tf.keras.utils.normalize(x_train)
-x_val = tf.keras.utils.normalize(x_val)
-x_test = tf.keras.utils.normalize(x_test)
 
+'''
 model = tf.keras.models.Sequential()
 model.add(tf.keras.layers.Dense(8000, input_dim = 8000, activation=tf.nn.relu))
 model.add(tf.keras.layers.Dropout(0.3))
@@ -156,20 +166,23 @@ model.add(tf.keras.layers.Dense(2000, activation=tf.nn.relu))
 model.add(tf.keras.layers.Dropout(0.3))
 model.add(tf.keras.layers.Dense(2000, activation=tf.nn.relu))
 model.add(tf.keras.layers.Dropout(0.3))
-model.add(tf.keras.layers.Dense(len(POSSIBLE_LABELS), activation=tf.nn.softmax))
+model.add(tf.keras.layers.Dense(len(POSSIBLE_LABELS), activation=tf.nn.softmax))'''
 
-'''
+print(x_train)
+print(x_train.shape)
+
 model = tf.keras.models.Sequential()
-model.add(tf.keras.layers.Conv2D(64, kernel_size=(4, 4),
-                 activation='relu',
-                 input_shape=(99, 81)))
-model.add(tf.keras.layers.Conv2D(64, (3, 3), activation='relu'))
+model.add(tf.keras.layers.Conv2D(64, (5, 5),
+                 activation=tf.nn.relu,
+                 input_shape=(99, 161, 1)))
+model.add(tf.keras.layers.MaxPooling2D(pool_size=(4, 4)))
+model.add(tf.keras.layers.Conv2D(64, (3, 3), activation=tf.nn.relu))
 model.add(tf.keras.layers.MaxPooling2D(pool_size=(2, 2)))
-model.add(tf.keras.layers.Dropout(0.25))
+model.add(tf.keras.layers.Dropout(0.4))
 model.add(tf.keras.layers.Flatten())
-model.add(tf.keras.layers.Dense(128, activation='relu'))
-model.add(tf.keras.layers.Dropout(0.5))
-model.add(tf.keras.layers.Dense(len(POSSIBLE_LABELS), activation='softmax')) '''
+model.add(tf.keras.layers.Dense(128, activation=tf.nn.relu))
+model.add(tf.keras.layers.Dropout(0.4))
+model.add(tf.keras.layers.Dense(len(POSSIBLE_LABELS), activation=tf.nn.softmax)) 
 
 model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=["accuracy"])
 
@@ -181,6 +194,11 @@ model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=
        
       
 
-model.fit(x_train, y_train, validation_data=(x_val, y_val), epochs = 30)
+model.fit(x_train, y_train, validation_data=(x_val, y_val), epochs = 1)
 a = model.evaluate(x_test, y_test)
 print(a)
+
+
+end = timeit.timeit()
+print(end - start)
+

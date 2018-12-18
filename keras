@@ -122,9 +122,9 @@ def data_generator(data):
                 mean = np.mean(spectrogram, axis=0)
                 std = np.std(spectrogram, axis=0)
                 spectrogram = (spectrogram - mean) / std
-                print(spectrogram)
+                #print(spectrogram)
                 yield (
-                    spectrogram,
+                    wav,
                     np.int32(label_id)
                 )
         except Exception as err:
@@ -138,25 +138,38 @@ def generatorToDataXYArrays(generator):
     return np.array(X), np.array(Y)
   
 x_train, y_train = generatorToDataXYArrays(data_generator(trainset))
+print(x_train.shape)
 x_val, y_val = generatorToDataXYArrays(data_generator(valset))
 x_test, y_test = generatorToDataXYArrays(data_generator(testset))
 
 import tensorflow as tf
 
-print(x_train[0])
+
 x_train = tf.keras.utils.normalize(x_train)
-print(x_train[0])
 x_val = tf.keras.utils.normalize(x_val)
 x_test = tf.keras.utils.normalize(x_test)
 
 model = tf.keras.models.Sequential()
-model.add(tf.keras.layers.Dense(4, input_dim = 8000, activation=tf.nn.relu))
+model.add(tf.keras.layers.Dense(8000, input_dim = 8000, activation=tf.nn.relu))
 model.add(tf.keras.layers.Dropout(0.3))
 model.add(tf.keras.layers.Dense(2000, activation=tf.nn.relu))
 model.add(tf.keras.layers.Dropout(0.3))
 model.add(tf.keras.layers.Dense(2000, activation=tf.nn.relu))
 model.add(tf.keras.layers.Dropout(0.3))
 model.add(tf.keras.layers.Dense(len(POSSIBLE_LABELS), activation=tf.nn.softmax))
+
+'''
+model = tf.keras.models.Sequential()
+model.add(tf.keras.layers.Conv2D(64, kernel_size=(4, 4),
+                 activation='relu',
+                 input_shape=(99, 81)))
+model.add(tf.keras.layers.Conv2D(64, (3, 3), activation='relu'))
+model.add(tf.keras.layers.MaxPooling2D(pool_size=(2, 2)))
+model.add(tf.keras.layers.Dropout(0.25))
+model.add(tf.keras.layers.Flatten())
+model.add(tf.keras.layers.Dense(128, activation='relu'))
+model.add(tf.keras.layers.Dropout(0.5))
+model.add(tf.keras.layers.Dense(len(POSSIBLE_LABELS), activation='softmax')) '''
 
 model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=["accuracy"])
 
@@ -166,18 +179,7 @@ model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=
 #    if len(t[0]) != 16000:
 #        print(len(t[0]))
        
-
-#model = Sequential()
-#model.add(Conv2D(32, kernel_size=(3, 3),
-#                 activation='relu',
-#                 input_shape=input_shape))
-#model.add(Conv2D(64, (3, 3), activation='relu'))
-#model.add(MaxPooling2D(pool_size=(2, 2)))
-#model.add(Dropout(0.25))
-#model.add(Flatten())
-#model.add(Dense(128, activation='relu'))
-#model.add(Dropout(0.5))
-#model.add(Dense(num_classes, activation='softmax'))       
+      
 
 model.fit(x_train, y_train, validation_data=(x_val, y_val), epochs = 30)
 a = model.evaluate(x_test, y_test)

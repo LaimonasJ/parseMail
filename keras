@@ -6,19 +6,26 @@ import re
 import numpy as np
 from glob import glob
 import zipfile
+import math #ceil 
+import time  #laiko matavimui
 
-start = timeit.timeit()
+
+print(os.listdir(DATADIR+'/train/'))
+with open(DATADIR+'/train/validation_list.txt', 'r') as fin:
+    print(fin.read())
+
+startTime = time.time()  #vykdymo pradzia
 
 POSSIBLE_LABELS = 'yes no up down left right on off stop go silence unknown'.split()
 id2name = {i: name for i, name in enumerate(POSSIBLE_LABELS)}
 name2id = {name: i for i, name in id2name.items()}
 
 
-def load_data(data_dir):
-    """ Return 2 lists of tuples:
+def getSets(data_dir):
+    ''' Return 3 lists of tuples:
     [(class_id, user_id, path), ...] for train
     [(class_id, user_id, path), ...] for validation
-    """
+    '''
     # Just a simple regexp for paths with three groups:
     # prefix, label, user_id
     pattern = re.compile("(.+\/)?(\w+)\/([^_]+)_.+wav")
@@ -61,18 +68,19 @@ def load_data(data_dir):
             else:
                 train.append(sample)
 
-    print('There are {} train, {} val, {} test samples'.format(len(train), len(val), len(test)))
+    #print('There are {} train, {} val, {} test samples'.format(len(train), len(val), len(test)))
     return train, val, test
         
-trainset, valset, testset = load_data(DATADIR)
+trainset, valset, testset = getSets(DATADIR)
+#print(trainset[0], trainset[1], valset[0], valset[1], testset[0], testset[1])
 
 from scipy.io import wavfile
 import scipy.signal as signal
 
 def log_specgram(audio, sample_rate, window_size=20,
                  step_size=10, eps=1e-10):
-    nperseg = int(round(window_size * sample_rate / 1e3))
-    noverlap = int(round(step_size * sample_rate / 1e3))
+    nperseg = int(round(window_size * sample_rate / 1000.))
+    noverlap = int(round(step_size * sample_rate / 1000.))
     freqs, times, spec = signal.spectrogram(audio,
                                     fs=sample_rate,
                                     window='hann',
@@ -176,6 +184,7 @@ model.add(tf.keras.layers.Conv2D(64, (5, 5),
                  activation=tf.nn.relu,
                  input_shape=(99, 161, 1)))
 model.add(tf.keras.layers.MaxPooling2D(pool_size=(4, 4)))
+model.add(tf.keras.layers.MaxPooling2D(pool_size=(3, 3)))
 model.add(tf.keras.layers.Conv2D(64, (3, 3), activation=tf.nn.relu))
 model.add(tf.keras.layers.MaxPooling2D(pool_size=(2, 2)))
 model.add(tf.keras.layers.Dropout(0.4))
@@ -198,7 +207,4 @@ model.fit(x_train, y_train, validation_data=(x_val, y_val), epochs = 1)
 a = model.evaluate(x_test, y_test)
 print(a)
 
-
-end = timeit.timeit()
-print(end - start)
-
+print('Runtime ' + str(round((time.time() - startTime) / 60, 3)) + ' minutes')

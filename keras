@@ -132,7 +132,7 @@ def data_generator(data):
                     beg = 0
                 wav = wav[beg: beg + newSampleRate]
                 wav = wav.astype(np.float32) / np.iinfo(np.int16).max
-                if count == 0:
+                #if count == 0:
                     
                 freqs, times, spectrogram = log_specgram(wav, newSampleRate)
                 mean = np.mean(spectrogram, axis=0)
@@ -184,7 +184,6 @@ model.add(tf.keras.layers.Conv2D(64, (5, 5),
                  activation=tf.nn.relu,
                  input_shape=(99, 161, 1)))
 model.add(tf.keras.layers.MaxPooling2D(pool_size=(4, 4)))
-model.add(tf.keras.layers.MaxPooling2D(pool_size=(3, 3)))
 model.add(tf.keras.layers.Conv2D(64, (3, 3), activation=tf.nn.relu))
 model.add(tf.keras.layers.MaxPooling2D(pool_size=(2, 2)))
 model.add(tf.keras.layers.Dropout(0.4))
@@ -202,8 +201,7 @@ model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=
 #        print(len(t[0]))
        
       
-
-model.fit(x_train, y_train, validation_data=(x_val, y_val), epochs = 1)
+model.fit(x_train, y_train, validation_data=(x_val, y_val), epochs = 30)
 a = model.evaluate(x_test, y_test)
 print(a)
 

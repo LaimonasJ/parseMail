@@ -1,0 +1,507 @@
+
+
+DATADIR = '../input' # unzipped train and test data
+
+OUTDIR = './model-k' # just a random name
+
+# Data Loading
+
+import os
+
+import re
+
+import numpy as np
+
+from glob import glob
+
+import zipfile
+
+import math #ceil 
+
+import time  #laiko matavimui
+
+import IPython #grojimui
+
+from scipy.io import wavfile
+
+import scipy.signal as signal
+
+​
+
+#print(os.listdir(DATADIR+'/train/'))
+
+#with open(DATADIR+'/train/validation_list.txt', 'r') as fin:
+
+#    print(fin.read())
+
+​
+
+startTime = time.time()  #vykdymo pradzia
+
+​
+
+POSSIBLE_LABELS = 'yes no up down left right on off stop go silence unknown'.split()
+
+id2name = {i: name for i, name in enumerate(POSSIBLE_LABELS)}
+
+name2id = {name: i for i, name in id2name.items()}
+
+def getSets(data_dir):
+
+    ''' Return 3 lists of tuples:
+
+    [(class_id, user_id, path), ...] for train
+
+    [(class_id, user_id, path), ...] for validation
+
+    '''
+
+    # Just a simple regexp for paths with three groups:
+
+    # prefix, label, user_id
+
+    pattern = re.compile("(.+\/)?(\w+)\/([^_]+)_.+wav")
+
+    all_files = glob(os.path.join(data_dir, 'train/audio/*/*wav'))
+
+​
+
+    with open(os.path.join(data_dir, 'train/validation_list.txt'), 'r') as fin:
+
+        validation_files = fin.readlines()
+
+    valset = set()
+
+    for entry in validation_files:
+
+        r = re.match(pattern, entry)
+
+        if r:
+
+            valset.add(r.group(3))
+
+            
+
+    with open(os.path.join(data_dir, 'train/testing_list.txt'), 'r') as fin:
+
+        testFiles = fin.readlines()
+
+    testSet = set()
+
+    for entry in testFiles:
+
+        r = re.match(pattern, entry)
+
+        if r:
+
+            testSet.add(r.group(3))
+
+​
+
+    possible = set(POSSIBLE_LABELS)
+
+    train, val, test = [], [], []
+
+    for entry in all_files:
+
+        r = re.match(pattern, entry)
+
+        if r:
+
+            label, uid = r.group(2), r.group(3)
+
+            if label == '_background_noise_':
+
+                label = 'silence'
+
+            if label not in possible:
+
+                label = 'unknown'
+
+            label_id = name2id[label]
+
+​
+
+            sample = (label_id, uid, entry)
+
+​
+
+            if uid in valset:
+
+                val.append(sample)
+
+            elif uid in testSet:
+
+                test.append(sample)
+
+            elif label != 'silence':
+
+                train.append(sample)
+
+​
+
+    #print('There are {} train, {} val, {} test samples'.format(len(train), len(val), len(test)))
+
+    return train, val, test
+
+        
+
+trainset, valset, testset = getSets(DATADIR)
+
+#print(trainset[0], trainset[1], valset[0], valset[1], testset[0], testset[1])
+
+def log_specgram(audio, sample_rate, window_size=20,
+
+                 step_size=10, eps=1e-10):
+
+    nperseg = int(round(window_size * sample_rate / 1000.))
+
+    noverlap = int(round(step_size * sample_rate / 1000.))
+
+    freqs, times, spec = signal.spectrogram(audio,
+
+                                    fs=sample_rate,
+
+                                    window='hann',
+
+                                    nperseg=nperseg,
+
+                                    noverlap=noverlap,
+
+                                    detrend=False)
+
+    return freqs, times, np.log(spec.T.astype(np.float32) + eps)
+
+​
+
+def custom_fft(y, fs):
+
+    T = 1.0 / fs
+
+    N = y.shape[0]
+
+    yf = fft(y)
+
+    xf = np.linspace(0.0, 1.0/(2.0*T), N//2)
+
+    vals = 2.0/N * np.abs(yf[0:N//2])  # FFT is simmetrical, so we take just the first half
+
+    return xf, vals
+
+​
+
+limit = 5000000
+
+sampleRate = 16000
+
+newSampleRate = 8000
+
+#Atmeta failus maziau nei 1 sekunde. <- Taisyti
+
+#Daugiau nei viena sekunde yra tik background (kaip silence), todel dalinam i dalis po 1 sekunde
+
+#visu grazintu ilgis 16000
+
+def data_generator(data):
+
+    count = 0
+
+    np.random.shuffle(data)
+
+    for (label_id, uid, fname) in data:
+
+        count = count + 1
+
+        if count % 1000 == 0:
+
+            print(count)
+
+        if count >= limit:
+
+            raise StopIteration
+
+        try:
+
+            a, wav = wavfile.read(fname)
+
+            #wav = wav.astype(np.float32) / np.iinfo(np.int16).max
+
+            if len(wav) < sampleRate:
+
+                #wav = np.pad(wav, (0, sampleRate - len(wav)), 'constant')
+
+                continue
+
+            
+
+            #wav = signal.resample(wav, int(newSampleRate/sampleRate * wav.shape[0]))
+
+            newSampleRate = sampleRate
+
+            
+
+            #print(fname)
+
+            samples_per_file = 1 if label_id != name2id['silence'] else 20
+
+            for _ in range(samples_per_file):
+
+                if len(wav) > newSampleRate:
+
+                    beg = np.random.randint(0, len(wav) - newSampleRate)
+
+                else:
+
+                    beg = 0
+
+                wav = wav[beg: beg + newSampleRate]
+
+                wav = wav.astype(np.float32) / np.iinfo(np.int16).max
+
+                #if count == 0:
+
+                    
+
+                freqs, times, spectrogram = log_specgram(wav, newSampleRate)
+
+                mean = np.mean(spectrogram, axis=0)
+
+                std = np.std(spectrogram, axis=0)
+
+                spectrogram = (spectrogram - mean) / std
+
+                #print(spectrogram)
+
+                yield (
+
+                    spectrogram,
+
+                    np.int32(label_id)
+
+                )
+
+        except Exception as err:
+
+            print(err, label_id, uid, fname)
+
+            
+
+def generatorToDataXYArrays(generator):
+
+    X, Y = [], []
+
+    for d in generator:
+
+        X.append(d[0])
+
+        Y.append(d[1])
+
+    return np.array(X), np.array(Y)
+
+ 
+
+x_train, y_train = generatorToDataXYArrays(data_generator(trainset))
+
+x_val, y_val = generatorToDataXYArrays(data_generator(valset))
+
+x_test, y_test = generatorToDataXYArrays(data_generator(testset))
+
+​
+
+x_train_r = x_train.reshape([-1,99, 161,1])
+
+x_val_r = x_val.reshape([-1,99, 161,1])
+
+x_test_r = x_test.reshape([-1,99, 161,1])
+
+1000
+2000
+3000
+4000
+5000
+6000
+7000
+8000
+9000
+10000
+11000
+12000
+13000
+14000
+15000
+16000
+17000
+18000
+19000
+20000
+21000
+22000
+23000
+24000
+25000
+26000
+27000
+28000
+29000
+30000
+31000
+32000
+33000
+34000
+35000
+36000
+37000
+38000
+39000
+40000
+41000
+42000
+43000
+44000
+45000
+46000
+47000
+48000
+49000
+50000
+51000
+1000
+2000
+3000
+4000
+5000
+6000
+1000
+2000
+3000
+4000
+5000
+6000
+
+#print(trainset[0][2])
+
+#aa = np.array([[[1], [2]],[[2],[3]]])
+
+#print(x_train_r.shape, x_train.shape, aa.shape, x_train_r[0][0])
+
+IPython.display.Audio(trainset[0][2], rate = sampleRate)
+
+Your browser does not support the audio element.
+
+import tensorflow as tf
+
+​
+
+model = tf.keras.models.Sequential()
+
+model.add(tf.keras.layers.Conv2D(64, (5, 5),
+
+                 activation=tf.nn.relu,
+
+                 input_shape=(99, 161, 1)))
+
+model.add(tf.keras.layers.MaxPooling2D(pool_size=(4, 4)))
+
+model.add(tf.keras.layers.Conv2D(64, (3, 3), activation=tf.nn.relu))
+
+model.add(tf.keras.layers.MaxPooling2D(pool_size=(2, 2)))
+
+model.add(tf.keras.layers.Dropout(0.4))
+
+model.add(tf.keras.layers.Flatten())
+
+model.add(tf.keras.layers.Dense(128, activation=tf.nn.relu))
+
+model.add(tf.keras.layers.Dropout(0.4))
+
+model.add(tf.keras.layers.Dense(len(POSSIBLE_LABELS), activation=tf.nn.softmax)) 
+
+​
+
+model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=["accuracy"])
+
+​
+
+#print(next((data_generator(testset)))
+
+#for t in data_generator(testset):
+
+#    print(len(t[1]))
+
+#    if len(t[0]) != 16000:
+
+#        print(len(t[0]))
+
+       
+
+      
+
+model.fit(x_train_r, y_train, validation_data=(x_val_r, y_val), epochs = 30)
+
+a = model.evaluate(x_test_r, y_test)
+
+print(a)
+
+​
+
+print(x_test_r[0:1])
+
+​
+
+print([id2name[x] for x in model.predict_classes(x_test_r[0:50], verbose=1)])
+
+​
+
+print('Runtime ' + str(round((time.time() - startTime) / 60, 3)) + ' minutes')
+
+Train on 45884 samples, validate on 6137 samples
+Epoch 1/30
+45884/45884 [==============================] - 50s 1ms/step - loss: 1.1401 - acc: 0.6728 - val_loss: 0.7696 - val_acc: 0.7396
+Epoch 2/30
+45884/45884 [==============================] - 46s 1ms/step - loss: 0.7780 - acc: 0.7470 - val_loss: 0.5374 - val_acc: 0.8203
+Epoch 3/30
+45884/45884 [==============================] - 46s 1ms/step - loss: 0.6425 - acc: 0.7870 - val_loss: 0.4735 - val_acc: 0.8543
+Epoch 4/30
+ 5984/45884 [==>...........................] - ETA: 38s - loss: 0.5558 - acc: 0.8065
+
+---------------------------------------------------------------------------
+KeyboardInterrupt                         Traceback (most recent call last)
+<ipython-input-28-17542468b53d> in <module>()
+     23 
+     24 
+---> 25 model.fit(x_train_r, y_train, validation_data=(x_val_r, y_val), epochs = 30)
+     26 a = model.evaluate(x_test_r, y_test)
+     27 print(a)
+
+/opt/conda/lib/python3.6/site-packages/tensorflow/python/keras/engine/training.py in fit(self, x, y, batch_size, epochs, verbose, callbacks, validation_split, validation_data, shuffle, class_weight, sample_weight, initial_epoch, steps_per_epoch, validation_steps, **kwargs)
+   1603           initial_epoch=initial_epoch,
+   1604           steps_per_epoch=steps_per_epoch,
+-> 1605           validation_steps=validation_steps)
+   1606 
+   1607   def evaluate(self,
+
+/opt/conda/lib/python3.6/site-packages/tensorflow/python/keras/engine/training_arrays.py in fit_loop(model, inputs, targets, sample_weights, batch_size, epochs, verbose, callbacks, val_inputs, val_targets, val_sample_weights, shuffle, initial_epoch, steps_per_epoch, validation_steps)
+    212           ins_batch[i] = ins_batch[i].toarray()
+    213 
+--> 214         outs = f(ins_batch)
+    215         if not isinstance(outs, list):
+    216           outs = [outs]
+
+/opt/conda/lib/python3.6/site-packages/tensorflow/python/keras/backend.py in __call__(self, inputs)
+   2967 
+   2968     fetched = self._callable_fn(*array_vals,
+-> 2969                                 run_metadata=self.run_metadata)
+   2970     self._call_fetch_callbacks(fetched[-len(self._fetches):])
+   2971     return fetched[:len(self.outputs)]
+
+/opt/conda/lib/python3.6/site-packages/tensorflow/python/client/session.py in __call__(self, *args, **kwargs)
+   1397           ret = tf_session.TF_SessionRunCallable(
+   1398               self._session._session, self._handle, args, status,
+-> 1399               run_metadata_ptr)
+   1400         if run_metadata:
+   1401           proto_data = tf_session.TF_GetBuffer(run_metadata_ptr)
+
+KeyboardInterrupt: 
+
+​
+

@@ -10,9 +10,9 @@ import math #ceil
 import time  #laiko matavimui
 
 
-print(os.listdir(DATADIR+'/train/'))
-with open(DATADIR+'/train/validation_list.txt', 'r') as fin:
-    print(fin.read())
+#print(os.listdir(DATADIR+'/train/'))
+#with open(DATADIR+'/train/validation_list.txt', 'r') as fin:
+#    print(fin.read())
 
 startTime = time.time()  #vykdymo pradzia
 
@@ -65,10 +65,10 @@ def getSets(data_dir):
                 val.append(sample)
             elif uid in testSet:
                 test.append(sample)
-            else:
+            elif label != 'silence':
                 train.append(sample)
 
-    #print('There are {} train, {} val, {} test samples'.format(len(train), len(val), len(test)))
+    print('There are {} train, {} val, {} test samples'.format(len(train), len(val), len(test)))
     return train, val, test
         
 trainset, valset, testset = getSets(DATADIR)
